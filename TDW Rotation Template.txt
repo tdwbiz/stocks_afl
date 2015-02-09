@@ -1,0 +1,99 @@
+// --- TDW Rotation Template.afl ---
+
+/* 
+** -----------------------------------------
+**
+** Momentum Rotation Strategy
+** run with periodicity set to
+** Daily    : MomLength = 64, AvgLength = 20
+** Weekly   : MomLength = 14, AvgLength =  1
+** Monthly  : MomLength =  3, AvgLength =  1
+** Quarterly: MomLength =  1, AvgLength =  1
+**
+** code by TrendXplorer
+** trendxplorer@gmail.com
+** www.trendxplorer.info
+** version: Mar 22, 2014
+** http://indexswingtrader.blogspot.ca/
+** -----------------------------------------
+*/
+
+SystemName="sD_ETF_TDW_Rotation"; _CashPercentage=0; _MaxScaleIn=4; _Cashticker    ="IEF"; _Cashticker2        = "VIX";
+//#include<BoilerPlate.afl>
+#include<OutputStatistics.afl> 
+
+// --- backtester settings --- 
+PosQty = 1; // Position Quantity: max number of positions
+
+SetOption( "CommissionAmount", 0.00 );
+SetOption( "InitialEquity", 100000 );
+SetOption( "MaxOpenshort", 0 );
+SetOption( "MaxOpenLong", PosQty );
+SetOption( "MaxOpenPositions", PosQty );
+SetOption( "WorstRankHeld", PosQty );
+SetOption( "AllowPositionShrinking", True );
+SetPositionSize( 100 / PosQty, spsPercentOfEquity );
+// trade on next day open
+SetTradeDelays( 1, 1, 1, 1 );
+SetBacktestMode( backtestRotational );
+Filter = Status( "LastBarInTest" );
+
+// --- inputs ---
+MomLength = Param( "Momentum Period", 14, 1, 52, 1 );
+AvgLength = Param( "Smooth Period"  , 2, 1,  6, 1 );
+
+
+MomStart = 1;
+MomEnd=52;
+AvgStart=1;
+AvgEnd=6;
+
+
+//MomLength = Optimize( "Momentum Period", MomStart, MomStart, MomEnd, 1 );
+//AvgLength = Optimize( "Smooth Period"  , AvgStart, AvgStart, AvgEnd, 1 );
+
+
+// --- detect watchlist ---
+wlnumber       = GetOption( "FilterIncludeWatchlist" );
+watchlist      = GetCategorySymbols( categoryWatchlist, wlnumber );
+
+// --- ranking routine ---
+// based on https://groups.yahoo.com/neo/groups/amibroker/conversations/topics/178791
+if ( Status( "stocknum" ) == 0 )
+{
+    StaticVarRemove( "Mom*" );
+    StaticVarRemove( "RankMom*" );
+
+    for ( i = 0; ( symbol = StrExtract( watchlist, i ) )  != "";  i++ )
+    {
+        SetForeign ( symbol );
+        Data = MA( Close, AvgLength );
+        Mom  = ( Data / Ref( Data, -MomLength ) ) * 100;
+        RestorePriceArrays();
+        
+        StaticVarSet( "Mom" + symbol, Mom );
+    }
+    // generate ranks for Momentum
+    StaticVarGenerateRanks( "Rank", "Mom", 0, 1224 );
+    RestorePriceArrays();
+}
+
+// --- get values and ranks for Momentum ---
+symbol  =  Name();
+Mom     =  StaticVarGet( "Mom"     +  symbol );
+RankMom =  StaticVarGet( "RankMom" +  symbol );
+
+// --- portfolio rebalancing ---						  							  
+PositionScore = 1000 - RankMom; // always positive to prevent short trades
+
+// --- generate columns for strategy exploration ---
+ColorMom     = IIf( Mom > 0, colorLime, colorRed );
+ColorTopX    = IIf( RankMom <= PosQty, IIf( Mom > 0, colorGold, colorRed ), colorWhite );
+AddColumn( Mom       , "Momentum"  , 3.3, 1, ColorMom  );
+AddColumn( RankMom   , "RankMom"   , 1.0, 1, ColorTopX );
+AddTextColumn( Name(), "Tickers"   , 1.0, 1, ColorTopX );
+AddTextColumn( FullName(), "Name"   , 1.0, 1, ColorTopX );
+
+if ( Status( "action" ) == actionExplore ) SetSortColumns( -2, 4 ); // sort for Exploration only
+
+// --- end of code ---

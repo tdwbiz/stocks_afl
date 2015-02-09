@@ -1,0 +1,71 @@
+//	SectorRotation.afl
+//
+//	Compute a score based on the recent Rate Of Change
+//	of the closing price.
+//
+//	Rotate among the nine S&P sector ETFs
+//
+//	Program options include allowing short positions or not
+//	and interpreting the ROC as a mean reverting indicator
+//	by turning it "upside down".
+
+
+//TimeFrameSet(inWeekly);
+//EnableRotationalTrading();
+SetBacktestMode( backtestRotational ); 
+// trade on next day open
+SetTradeDelays( 1, 1, 1, 1 );
+
+//	The number of issues to hold at a time //4
+NumberHeld = 1;//Optimize("NumberHeld",1,1,4,1);
+
+//	Allocate funds equally among all issues
+PositionSize = -100/NumberHeld;
+
+//	Set WorstRankHeld to be some number greater
+//	than the number of positions held.3
+NumberExtras = 0;//Optimize("NumberExtras",2,0,4,1);
+
+WorstRank = NumberHeld + NumberExtras;
+SetOption("WorstRankHeld", WorstRank);
+SetOption("HoldMinBars", 1 ); 
+
+//	The LookBack period for the Rate of Change indicator 2
+
+ShortLookBack = 3;//Optimize("LookBack",14,1,52,1);
+MediumLookBack = 9;//Optimize("LookBack",14,1,52,1);
+LongLookBack = 27;//Optimize("LookBack",14,1,52,1);
+
+
+//AddColumn(ROC(C,LookBack),"ROC");
+Score = 1000+0.1*ROC(C,ShortLookBack)+0.5*ROC(C,MediumLookBack)+1.5*ROC(C,LongLookBack);
+//Score = 1000+ROC(C,LookBack);
+fc = Foreign( "SPY", "C" ); 
+Score = IIf(ROC(fc,ShortLookBack)>0,Score,0);
+
+
+
+//LowestAllowedprice = 2;//Optimize("LowestAllowedprice",4,2,9,1);
+//HighestAllowedprice = 800;//Optimize("HighestAllowedprice",10,10,100,5);
+
+
+//Score = IIf(Close>=LowestAllowedprice,Score,0);
+//Score = IIf(Close<=HighestAllowedprice ,Score,0);
+
+
+
+
+//prevROC = -4;//Optimize("prevROC",-3,-7,-3,1);
+//prevPrevROC = -8;//Optimize("prevPrevROC",-7,-20,-7,1);
+
+//aYear = Optimize("aYear",1995,1995,2010,1);
+
+
+//Score = IIf(Ref(Close,prevROC ) < Ref(Close,prevPrevROC),Score,0);
+//Score = IIf(Month() == 1 OR Month() == 2 OR Month() == 3 OR Month() == 4 OR Month() == 10 OR Month() == 11 OR Month() == 12,Score,0);
+//Score = IIf( Year() == 2007 , 0 ,Score);
+
+
+PositionScore = IIF((Score>1 AND DayOfWeek() == 5),Score,0);
+//TimeFrameSet(inDaily);
+//Figure 15.1 Sector Rotation

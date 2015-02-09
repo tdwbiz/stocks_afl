@@ -1,0 +1,355 @@
+////////////////////////////////////////////////////////////////////////////////////////
+//
+// --- EAA_GoldenModels_v3.afl ---
+//
+// A Century of Generalized Momentum;
+// From Flexible Asset Allocations (FAA) to Elastic Asset Allocation (EAA)
+// by Wouter Keller and Adam Bulter
+// http://papers.ssrn.com/sol3/papers.cfm?abstract_id=2543979
+//
+// AmiBroker implementation by TrendXplorer
+// www.trendxplorer.info
+// trendxplorer@gmail.com
+//
+// trade logic provided by "fxshrat" from the Yahoo AmiBroker User's List:
+// https://groups.yahoo.com/neo/groups/amibroker/info
+//
+// latest version: January 11, 2015
+//
+// IMPORTANT EXECUTION ORDER:
+// 1 - ADJUSTING START AND END DATES
+// 2 - USE BACKTESTER SETTINGS FOR MONTHLY PERIODICITY
+// 3 - START BACKTEST
+//
+////////////////////////////////////////////////////////////////////////////////////////
+
+
+// --- begin of code ---
+
+
+// --- detect watchlist ---
+wlnumber        = GetOption( "FilterIncludeWatchlist" );
+watchlist       = GetCategorySymbols( categoryWatchlist, wlnumber );
+NumberOfSymbols = StrCount( watchlist, "," ) + 1;
+NoS             = NumberOfSymbols;
+
+// --- calculated advised top quantile ---
+Ntop   = 1 + ceil( sqrt( NoS ) );
+Nmax   = floor( NoS / 2 );
+Ntop   = Min( Ntop, Nmax );
+
+// --- backtester settings ---
+SetOption( "CommissionAmount", 0.00 );
+SetOption( "InitialEquity", 100000 );
+SetTradeDelays( 0, 0, 0, 0 ); 
+SetOption( "MaxOpenLong", NoS );
+SetOption( "MaxOpenPositions", NoS );
+SetOption( "AllowPositionShrinking", True );
+SetOption( "AllowSameBarExit", True ); 
+SetOption( "ReverseSignalForcesExit", False ); 
+SetOption( "HoldMinBars", 1 );
+SetBacktestMode( backtestRegularRaw );
+SetOption("ExtraColumnsLocation", 11 );
+RoundLotSize = 1; 
+
+
+// --- inputs ---
+mode    = ParamList("Golden Model mode", "Defensive|Offensive|EW_Hedged|EW_Return" );
+PosQty  = Param( "Number of Positions ( " + Ntop + " )", 3, 1, NoS, 1 ); // Position Quantity: max number of positions
+CP      = ParamToggle( "Allocate to Cash Proxy", "No|Yes", 1 );
+
+_CashProxy     = ParamStr( "Cash Proxy	 ", "IEF" );
+
+w1m  = ParamToggle( "Include  1 month return?", "No|Yes", 1 );
+w3m  = ParamToggle( "Include  3 month return?", "No|Yes", 1 );
+w6m  = ParamToggle( "Include  6 month return?", "No|Yes", 1 );
+w12m = ParamToggle( "Include 12 month return?", "No|Yes", 1 );
+
+
+// --- init parameters ---
+wR = wC = wV = wS = 0;
+
+if ( mode == "Defensive" ) // zi ~ sqrt( ( 1 - ci ) * ri )
+{
+	wR = 1;
+	wC = 1;
+	wV = 0;
+	wS = 0.5;
+}
+
+if ( mode == "Offensive" ) // zi ~ ( 1 - ci ) * ri ^ 2
+{
+	wR = 1;
+	wC = 0.5;
+	wV = 0;
+	wS = 2;
+}
+
+if ( mode == "EW_Hedged" ) // zi ~ ( ( 1 - ci ) * ri ) ^ ( 0 + eps )
+{
+	wR = 1;
+	wC = 1;
+	wV = 0;
+	wS = 0;
+}
+
+if ( mode == "EW_Return" ) // zi ~ ( ri ) ^ ( 0 + eps )
+{
+	wR = 1;
+	wC = 0;
+	wV = 0;
+	wS = 0;
+}
+
+// --- persistent variables ON/OFF ---
+storage = false; 
+
+// --- init variables ---
+eps    = 0.00001;
+avgRet = sumRet1m = sumZi = sumNegRet = wCP = sumWi = 0;
+
+// --- calculate rfr, ri, vi, ci, zi and wi ---
+if ( Status( "stocknum" ) == 0 )
+{
+    StaticVarRemove( "avg*"  );
+    StaticVarRemove( "exc*"  );
+    StaticVarRemove( "sum*"  );
+    StaticVarRemove( "ret*"  );
+    StaticVarRemove( "vol*"  );        
+    StaticVarRemove( "cor*"  );        
+    StaticVarRemove( "ri*"   );
+    StaticVarRemove( "vi*"   );
+    StaticVarRemove( "ci*"   );
+    StaticVarRemove( "zi*"   );
+    StaticVarRemove( "w*"    );
+    StaticVarRemove( "N*"    );
+    StaticVarRemove( "Rank*" );
+    
+    for ( i = 0; ( symbol = StrExtract( watchlist, i ) )  != "";  i++ )
+    {
+        SetForeign ( symbol );
+			// --- load quotes ---
+			Data = Close;
+			//
+			// --- 1m, 3m, 6m and 12m and avg total return ---			
+			ret1m  = Nz( -1 + Data / Ref( Data, -1  ) );
+			ret3m  = Nz( -1 + Data / Ref( Data, -3  ) );
+			ret6m  = Nz( -1 + Data / Ref( Data, -6  ) );
+			ret12m = Nz( -1 + Data / Ref( Data, -12 ) );
+			avgRet = ( w1m * ret1m + w3m * ret3m + w6m * ret6m + w12m * ret12m ) / 
+					 ( w1m * 1     + w3m * 3     + w6m * 6     + w12m * 12     );
+        RestorePriceArrays();
+        
+        // --- sum 1m return for EW return ---
+        sumRet1m = sumRet1m + ret1m;
+               
+        // --- volatility ---
+        //
+        // --- match for Excel's STDEV.P ---
+        vol = StDev( ret1m, 12 );
+        //
+        // --- port to Excel's STDEV.S ---
+        vol  = sqrt( vol ^ 2 * 12 / 11 );
+        //
+        // --- annualization ---
+        vol = vol * sqrt( 12 );  
+        
+        StaticVarSet( "ret1m"   + symbol, ret1m	 , storage );
+        StaticVarSet( "ret3m"   + symbol, ret3m	 , storage );
+        StaticVarSet( "ret6m"   + symbol, ret6m	 , storage );
+        StaticVarSet( "ret12m"  + symbol, ret12m , storage );
+        StaticVarSet( "avgRet"  + symbol, avgRet , storage );
+        StaticVarSet( "vol"     + symbol, vol	 , storage );        
+    }  
+
+    // --- portfolio averages & values ---
+    retEW  = Nz( sumRet1m / NoS );
+        
+    // --- store portfolio values ---
+    StaticVarSet( "retEW" , retEW , storage );
+    
+    for ( i = 0; ( symbol = StrExtract( watchlist, i ) )  != "";  i++ )
+    {
+        ret1m   = StaticVarGet( "ret1m"   + symbol );
+        avgRet  = StaticVarGet( "avgRet"  + symbol );
+        retEW   = StaticVarGet( "retEW"            );
+        vol     = StaticVarGet( "vol"     + symbol );
+
+    	// --- correlation ---
+    	cor    = Correlation( ret1m, retEW, 12 );
+    	
+    	StaticVarSet( "cor" + symbol, cor, storage );
+    	
+        // --- calculate weigth for each symbol ---
+        ri     = avgRet;
+        vi     = vol;
+        ci     = cor;
+        
+        // --- EAA-formula: zi ~ ( ( ri ^ wR ) * ( 1 - ci ) ^ wC / vi ^ wV ) ^ wS, with zi = 0 if ri <= 0 ---
+        zi     = ( MAX( ri, 0 ) ^ wR * ( 1 - ci ) ^ wC / ( vi + eps ) ^ wV ) ^ ( wS + eps );
+        
+        // --- count symbols with non-positive ri for allocation to cash proxy ---
+        sumNegRet = sumNegRet + ( symbol != _CashProxy AND ri <= 0 );
+
+        StaticVarSet( "ri"   + symbol, ri, storage  );
+        StaticVarSet( "vi"   + symbol, vi, storage  );
+        StaticVarSet( "ci"   + symbol, ci, storage  );
+        StaticVarSet( "zi"   + symbol, zi, storage  );
+    }
+
+    // --- position size for CP exclusive of CP's wi ---
+	wCP    = Nz( 100 * CP * SumNegRet / NoS, 0 );
+
+    StaticVarSet( "wCP", wCP, storage );
+  
+    // --- generate ranks for zi for Ntop selection ---
+    StaticVarGenerateRanks( "Rank", "zi", 0, 1224 );
+
+    for ( i = 0; ( symbol = StrExtract( watchlist, i ) )  != "";  i++ )
+    {
+        zi      = StaticVarGet( "zi"     + symbol );
+        RankZi  = StaticVarGet( "Rankzi" + symbol );
+		
+		// --- sum zi when included in Ntop ---
+        sumZi   = IIf( RankZi <= PosQty, sumZi + zi, sumZi );		
+	}
+	
+    StaticVarSet( "sumZi", sumZi, storage );
+    
+    for ( i = 0; ( symbol = StrExtract( watchlist, i ) )  != "";  i++ )
+    {
+        zi      = StaticVarGet( "zi"     + symbol );
+        sumZi   = StaticVarGet( "sumZi"           );
+        RankZi  = StaticVarGet( "Rankzi" + symbol );
+        wCP     = StaticVarGet( "wCP"             );
+
+		wi      = IIf( RankZi <= PosQty, Nz( ( 100 - wCP ) * zi / ( SumZi + eps ) ), 0 );
+        
+        // --- for CP only: add wCP + wi ---
+        if ( symbol == _CashProxy ) wi = wi + wCP;
+        
+        // --- max wi for CP: 100% ---
+        wi      = IIf( wi > 100, 100, wi );
+
+		sumWi   = sumWi + wi;	
+		
+		StaticVarSet( "wi"   + symbol, wi, storage  );
+	}
+	
+    StaticVarSet( "sumWi", sumWi, storage ); 
+}
+
+// --- get values for weight calculations ---
+symbol   = Name();
+
+ret1m    = StaticVarGet( "ret1m"    + symbol );
+ret3m    = StaticVarGet( "ret3m"    + symbol );
+ret6m    = StaticVarGet( "ret6m"    + symbol );
+ret12m   = StaticVarGet( "ret12m"   + symbol );
+
+avgRet   = StaticVarGet( "avgRet"   + symbol );
+RetEW    = StaticVarGet( "RetEW"             );
+Vol      = StaticVarGet( "Vol"      + symbol );
+Cor      = StaticVarGet( "Cor"      + symbol );
+
+ri       = StaticVarGet( "ri"       + symbol );
+vi       = StaticVarGet( "vi"       + symbol );
+ci       = StaticVarGet( "ci"       + symbol );
+zi       = StaticVarGet( "zi"       + symbol );
+SumZi    = StaticVarGet( "sumZi"             );
+RankZi   = StaticVarGet( "Rankzi"   + symbol );
+wi       = StaticVarGet( "wi"       + symbol );
+sumWi    = StaticVarGet( "sumWi"             );
+wCP      = StaticVarGet( "wCP"               );
+
+
+// --- set position size ---			
+PositionSize = -wi;	 // negative to indicate %-value
+
+// --- buy & sell logic ---
+tradedelay = 0; 	 // bar delay
+
+if ( tradedelay > 0 )
+{
+    pricearray = Open;
+}
+else
+{
+    pricearray = Close;
+}
+
+// --- buy trigger when wi > 0 ---
+Buy       = Ref( wi, -tradedelay );
+Sell      = 0;
+Short     = Cover = 0;
+BuyPrice  = pricearray;
+SellPrice = Close;
+
+// --- exit at EoM for rebalancing --- 
+ApplyStop( stopTypeNBar, stopModeBars, numbars = 1, exitatstop = 0 );
+
+// --- exploration filter ---
+ExploreFilter = ParamToggle( "ExploreFilter", "LastBarInTest|All", 0 );
+if ( ExploreFilter )
+	Filter = 1;
+else
+	Filter = Status( "LastBarInTest" );
+	
+// --- sort for exploration only (not on backtest) ---
+if ( Status( "actionex" ) == actionExplore ) 
+{
+	SetSortColumns( 2, -11 );
+
+	// --- columns for exploration ---
+	AbsColor = IIf( ri > 0, colorBrightGreen, colorRed );
+	PosColor = IIf( Name() != _CashProxy, IIf( wi, colorGold, colorWhite ), IIf( wi, IIf( RankZi <= PosQty, colorGold, colorYellow ), colorWhite ) );
+
+	AddColumn( ret1m  * 100 * w1m  , "ret1m%"          , 3.2 );
+	AddColumn( ret3m  * 100 * w3m  , "ret3m%"          , 3.2 );
+	AddColumn( ret6m  * 100 * w6m  , "ret6m%"          , 3.2 );
+	AddColumn( ret12m * 100 * w12m , "ret12m%"         , 3.2 );
+
+	AddColumn( ri * 100            , "avgRet% (ri)"    , 3.6, 1, AbsColor );
+	AddColumn( vi * 100            , "Vol% (vi)"       , 3.3 );
+	AddColumn( ci * 100            , "Cor% (ci)"       , 3.3 );
+	AddColumn( zi * 100            , "zi    "          , 3.8 );
+	AddColumn( wi                  , "Pos.Size% (wi)"  , 3.3, 1, PosColor );
+}
+
+
+// --- initiate custom-backtest procedure ---
+SetCustomBacktestProc( "" );
+//
+// --- set custom name for portfolio equity ---
+_PortfolioName = ParamStr( "~~~PortfolioName", "~~~EAA" );
+//
+if ( Status( "action" ) == actionPortfolio )
+{
+    bo = GetBacktesterObject();
+    //
+    bo.Backtest( 1 ); 
+    //
+    eq = bo.EquityArray;
+    //
+    // --- iterate through closed trades collect EquityAtExit data ---
+    for ( trade = bo.GetFirstTrade(); trade; trade = bo.GetNextTrade() )
+    {
+        EquityAtExit = Lookup( eq, trade.ExitDateTime );
+        trade.AddCustomMetric( "Equity at exit", EquityAtExit );
+    }
+    bo.ListTrades();
+    //
+    // --- save equity data to composite symbol ---
+    AddToComposite( bo.EquityArray, 
+                 _PortfolioName, "X", 
+                 atcFlagDeleteValues | atcFlagEnableInPortfolio );
+    // 
+}
+
+
+////////////////////////////////////////////////////////////////////////////////////////
+//
+// --- end of code ---
+//
+////////////////////////////////////////////////////////////////////////////////////////
+

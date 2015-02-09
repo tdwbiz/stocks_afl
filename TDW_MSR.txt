@@ -1,0 +1,34 @@
+/*
+//http://quantingdutchman.wordpress.com/
+*/
+SystemName="sD_ETF_MSR"; _CashPercentage=0; _MaxScaleIn=4; _Cashticker    ="IEF"; _Cashticker2        = "VIX";
+#include<BoilerPlate.afl>
+
+#include<AdditionalFunctions.afl>
+#include<OutputStatistics.afl> 
+
+pos=25;
+size=10000;
+SetOption("InitialEquity",pos*size);
+SetPositionSize(size,spsValue);
+SetOption("AccountMargin",100);
+SetOption("MaxOpenPositions", pos ); 
+
+Period1=Optimize("p1",10,10,50,10);Period2=Optimize("p2",20,10,100,10);Period3=252;
+
+MaxH=HHV(H,period2);MaxL=HHV(L,period2);MaxC=HHV(C,period2);
+Max3=Max(Max(MaxH,MaxL),MaxC);
+//MSR=(QDMedian3(H,L,C,period1)-Max3)/Max3;
+MSR = 1;
+rank=percentrank(MSR,252);
+
+BuyCond=RSI(2)<50 AND DVI(252)<50;//C>WMA(C,89);//rank>50 ;
+SellCond=RSI(2)>50 OR DVI(252)>50;//C<WMA(C,89);//rank<50 ;
+
+ShortCond=0;//Sellcond;
+CoverCond=0;//BuyCond;
+
+Buy = BuyCond ;
+Sell =SellCond;
+Short =ShortCond;
+Cover =CoverCond;
