@@ -1,4 +1,4 @@
-//	SectorRotation.afl
+///	SectorRotation.afl
 //
 //	Compute a score based on the recent Rate Of Change
 //	of the closing price.

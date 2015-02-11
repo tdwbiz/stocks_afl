@@ -1,4 +1,4 @@
-// --- TDW Rotation Template.afl ---
+/// --- TDW Rotation Template.afl ---
 
 /* 
 ** -----------------------------------------

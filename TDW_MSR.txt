@@ -1,5 +1,5 @@
 /*
-//http://quantingdutchman.wordpress.com/
+///http://quantingdutchman.wordpress.com/
 */
 SystemName="sD_ETF_MSR"; _CashPercentage=0; _MaxScaleIn=4; _Cashticker    ="IEF"; _Cashticker2        = "VIX";
 #include<BoilerPlate.afl>
